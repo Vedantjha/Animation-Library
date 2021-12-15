@@ -1,0 +1,137 @@
+# line command
+#Shivsagar Mishra
+helpMenu()
+{
+   echo "Syntax: $0 [OPTIONS-AND-PARAMETERS] [--]
+
+Constructs a (full-length) line with the help of the passed character (default: '=')
+
+By default, the length of the entire line
+
+Options:
+   -c	The character to be horizontally printed.
+        (Default: '=')
+
+   -l	The length of the line to be constructed
+        (By default it is the entire width of the terminal)
+  
+   -i   The interval (in ms) at which every character should get printed.
+	(Default: 0)
+"
+}
+
+# The mode in which the parameter parser would accept each value
+mode='c'
+
+# Setting the length of the frame to the space available horizontally
+length=`tput cols`
+
+# The symbol with which the entire frame would be printed
+character='='
+
+# The (default) interval at which every character of the title would get printed
+interval='0'
+
+# Parameter parser
+for arg in "$@"; do
+
+  # Print the help menu and exit, if this argument is found.
+  if [ "$arg" == --help ]; then 
+   helpMenu
+   exit 0
+
+  # Set the mode as per the option specified by the user
+  elif [ "$arg" == -c ]; then mode=c
+  elif [ "$arg" == -l ]; then mode=l
+  elif [ "$arg" == -i ]; then mode=i
+  else
+    # If the parameter parser was set to accept an interval
+    if [ $mode == i ]; then
+
+      # A regex for positive decimal numbers
+      re='^[0-9]+([.][0-9]+)?$'
+
+      if ! [[ $arg =~ $re ]] ; then
+        echo "$0: The interval should be a number (time in milliseconds)" >&2
+	exit 1
+      fi
+
+      interval=$arg
+      mode=x
+    elif [ $mode == l ]; then
+
+      re='^[0-9]+$'
+
+      if ! [[ $arg =~ $re ]] ; then
+        echo "$0: The length should be a positive integer." >&2
+	exit 2
+      fi
+
+      length=`tput cols`
+
+      if [ $arg -le $length ]; then
+        length=$arg
+      fi
+
+      mode=x
+    elif [ $mode == c ]; then
+
+      if ! [ ${#arg} -eq 1 ] ; then
+        echo "$0: The symbol to be repeatedly printed should be a single character." >&2
+	exit 3
+      fi
+
+      character=$arg
+      mode=x
+    # If more than 1 value is specified for an option (mode=x)
+    else
+      echo "The options of this command only accept a single parameter while parsing." >&2
+      echo "Please re-check the passed arguments and re-try." >&2
+      exit 4
+    fi
+  fi
+done
+
+trap ctrl_c EXIT
+
+# This command would ensure that the keystroke made by the user wouldn't get echo-ed onto the terminal
+stty -echo
+
+# This function will always be killed when this process exits
+function ctrl_c() {
+
+  # This command would turn the echoing of keystrokes on
+  stty echo 2>/dev/null
+
+  # Return with exit code 0
+  return 0
+}
+
+# Directly print the string if the specified interval is 0
+if [ $interval == 0 ]
+then
+  eval printf "%.0s$character" {1..$length}
+
+# Else convert second into milliseconds and animate the specified string
+else
+  calc(){ awk "BEGIN { print "$*" }"; }
+
+  # Converting millisecond(s) into second(s)
+  interval=$(calc $interval/1000)
+
+
+  # -n[1] of the read command - makes sure that the input accepts just one character
+  while read -n1 c
+  do
+    # Wait for the given interval (ms)
+    sleep $interval
+    
+    # Echo the specified character on the same line (without echoing a new line)
+    echo -n "$c"
+  # {1..3} expands to 1 2 3 and {1..$n} -> 1 to n, but since $n is one expression and {1..n} is another, another round of evaluation would be needed to smile
+  # The expansion for those n elements would make printf print the $character length times
+  done < <(eval printf "%.0s$character" {1..$length})
+fi
+
+# Run the exit function
+ctrl_c

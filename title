@@ -1,0 +1,149 @@
+# title command
+#Vedant Mishra
+
+# A function that prints the help menu
+helpMenu()
+{
+   echo "Syntax: $0 [options] [--] TITLE-TO-BE-ANIMATED [ARGS...]
+
+Animates the passed title within a frame of given length and symbol.
+
+Options:
+   -l	The length of the frame (default: all the space available horizontally)
+  
+   -s	The symbol with which the frame should be built with.
+
+   -i   The interval (in ms) at which every character would get printed.
+
+   -m	The message or the title to be printed. (default)
+"
+}
+
+# The mode in which the parameter parser would accept each value
+mode='m'
+
+# Setting the length of the frame to the space available horizontally
+length=`tput cols`
+
+# Making some minor adjustments to avoid unexpected behavior under certain circumstances.
+# (While calculating the total number of columns visible in the terminal, the tput command at times even considers the last column that is not be completely visible, so that could print a character in the next line and hence distort the entire purpose of this command)
+eval length=`expr $length - 1`
+
+# The symbol with which the entire frame would be printed
+symbol='='
+
+# The (default) interval at which every character of the title would get printed
+interval='50'
+
+# If the script has not received any arguments then display the help menu and exit with code 0.
+if [ $# -eq 0 ] ; then
+  helpMenu
+  exit 0
+fi
+
+
+# Parameter parser
+for arg in "$@"; do
+  # Print the help menu and exit, if this argument is found.
+  if [ "$arg" == --help ]; then 
+   helpMenu
+   exit 0
+  # Set the mode as per the option specified by the user
+  elif [ "$arg" == -i ]; then mode=i
+  elif [ "$arg" == -s ]; then mode=s
+  elif [ "$arg" == -m ]; then mode=m
+  elif [ "$arg" == -l ]; then mode=l
+  else
+    if [ $mode == i ]; then
+
+      # A regex for positive decimal numbers
+      re='^[0-9]+([.][0-9]+)?$'
+
+      if ! [[ $arg =~ $re ]] ; then
+        echo "$0: The interval should be a number (time in milliseconds)" >&2
+	exit 1
+      fi
+
+      interval=$arg
+      mode=m
+    elif [ $mode == l ]; then
+
+      re='^[0-9]+$'
+
+      if ! [[ $arg =~ $re ]] ; then
+        echo "$0: The length should be a positive integer." >&2
+	exit 2
+      fi
+
+      length=`tput cols`
+      eval length=`expr $length - 1`  
+
+      if [ $arg -le $length ]; then
+        length=$arg
+      fi
+
+      mode=m
+    elif [ $mode == s ]; then
+
+      if ! [ ${#arg} -eq 1 ] ; then
+        echo "$0: The symbol to be repeatedly printed should be a single character." >&2
+	exit 3
+      fi
+
+      symbol=$arg
+      mode=m
+    else message="$message $arg"
+    fi
+  fi
+done
+
+# Remove the first default space
+message="${message:1}"
+
+# Check if the message variable is not empty
+if [ -z "$message" ] ; then
+  echo "$0: The string to be animated was not supplied." >&2
+  echo "Run '$0 --help' to know more about the usage of this command" >&2
+  exit 4
+fi
+
+# Check if the length of the message exceeds the length of 
+if [ ${#message} -gt $length ]; then
+  if [ ${#message} -le `tput cols` ]; then
+    length=${#message}
+  else
+    echo "$0: The message is longer than the horizontal space available length in the terminal." >&2
+    echo "Please ensure that there is enough horizontal space in your terminal " >&2
+    exit 5
+  fi
+fi
+
+calc(){ awk "BEGIN { print "$*" }"; }
+
+# Converting millisecond(s) into second(s)
+interval=$(calc $interval/1000)
+
+eval printf '$symbol%.0s' {0..$length}
+printf "\n\n"
+
+eval printf '$symbol%.0s' {0..$length}
+printf "\e[1A\e[k\r"
+
+f=`calc $length-${#message}`
+f=`calc $f/2`
+f=`printf '%.0f' $f`
+
+tput cuf $f
+
+trap ctrl_c EXIT
+
+stty -echo
+
+function ctrl_c() {
+  echo
+  stty echo 2>/dev/null
+  return 0
+}
+
+while IFS= read -n1 c; do sleep $interval; echo -n "$c"; done < <(echo -n "$message")
+ctrl_c

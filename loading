@@ -1,0 +1,284 @@
+# Get the name of the current script (The file name)
+cmdname=`basename $0`
+
+# Stores the mode in which the parameter(s) are to be accepted
+mode=c
+
+# The interval between each state transition
+interval=100 # Duration time in milliseconds
+
+# The default length of each state
+length=1
+
+# A function that prints the help menu
+helpMenu(){
+   echo "Syntax: $cmdname [options] [--] COMMAND-OR-CONDITION [ARGS...]
+
+Plays the loading animation with given states until the passed COMMAND exits with code 0.
+The COMMAND could be a simple bash condition too which indirectly is a command with args too.
+
+Options:
+   -c         Set the command or the condition to be waited for (until it exits with code 0 or is true)
+	      (It is the default mode in which the parameters are accepted)
+
+   -s STATES  Set the states that the loader should iterate through while loading.
+              (Default: |/-\)
+
+   -i INTERVAL Set the delay (in ms) between every state.
+
+   -l LENGTH   Set the length of each state (Default: 1)
+
+   -b COLORCODE Set the background color of the loader
+
+   -f COLORCODE Set the foreground color of the loader
+
+   -B           Make the loader bold
+"
+}
+
+# If no arguments are passed then print the help menu and exit with code 0
+# `$#` evalutes itself to the number of arguments passed
+if [ $# -eq 0 ]; then
+  helpMenu
+  exit 0
+fi
+
+# background color of the loader (default: black)
+backcolor=5
+
+# foreground color of the loader (default: white)
+forecolor=7
+
+## Parameter parser
+# $@ represents all the passed parameters
+for arg in "$@"; do
+
+  if [ "$arg" == --help ]; then 
+   helpMenu
+   exit 0
+  elif [ "$arg" == -i ]; then mode=i
+  elif [ "$arg" == -b ]; then mode=b
+  elif [ "$arg" == -f ]; then mode=f
+  elif [ "$arg" == -B ]; then bold=true
+  elif [ "$arg" == -s ]; then mode=s
+  elif [ "$arg" == -c ]; then mode=c
+  elif [ "$arg" == -l ]; then mode=l
+  else
+    # If the parser is currently expecting an interval
+    if [ $mode == i ]; then
+
+      # Regex for an unsigned number
+      re='^[0-9]+([.][0-9]+)?$'
+
+      # If the passed interval is not an unsigned number then print to stderr and exit with code 1.
+      # `!` represents logical not and `=~` is an comparison operator that checks if the given argument can match the given regex (unsigned number)
+      if ! [[ $arg =~ $re ]] ; then
+        echo "$cmdname: The interval should be a number (time in milliseconds)" >&2
+	exit 1
+      fi
+
+      # Assign the validated argument to variable interval
+      interval=$arg
+
+      # Set the default mode back to condition
+      mode=c
+
+    # If the parser is currently expecting a color code for the background of the interpreter
+    elif [ $mode == b ]; then
+
+      # A regular expression for positive integer
+      re='^[0-9]+$'
+
+      # If the passed argument is not a positive integer then print an error message to stderr and exit with code 2.
+      if ! [[ $arg =~ $re ]] ; then
+        echo "$cmdname: The color code for the background should be a positive integer." >&2
+	exit 2
+      fi
+
+      # Assign the validated argument to the variable backcolor
+      backcolor=$arg
+
+      # Switch back the mode of the parser to accept a condition
+      mode=c
+
+    # If the parser was set to accept the foreground color of the loader
+    elif [ $mode == f ]; then
+
+      # Regex for a positive integer
+      re='^[0-9]+$'
+
+      # If the passed argument is not a positive integer then print an error message to stderr and exit with code 3.
+      if ! [[ $arg =~ $re ]] ; then
+        echo "$cmdname: The color code for the foreground should be a positive integer." >&2
+	exit 3
+      fi
+
+      # Assign the validated argument to variable forecolor
+      forecolor=$arg
+
+      # Switch back to the default mode (c-condition)
+      mode=c
+
+    # If the arg parser was set in a mode to accept the length of each state
+    elif [ $mode == l ]; then
+
+      # Regex for a positive integer
+      re='^[0-9]+$'
+
+      # If the passed argument is not a positive integer then exit with code with code 4 along with an error message to stderr.
+      if ! [[ $arg =~ $re ]] ; then
+        echo "$cmdname: The length should be a positive integer." >&2
+	exit 4
+      fi
+
+      length=$arg
+      mode=c
+
+    # If the parser is in a mode of accepting states for the loader from the user 
+    elif [ $mode == s ]; then
+      # Append the argument to the variable states
+      states="$states $arg"
+
+    # If the parser is in a mode of accepting the condition from the user, then append the current argument.
+    # (Since there is no way the mode can be directly modified by the user)
+    else condition="$condition $arg"
+    fi
+  fi
+done
+
+#Om your part
+# Remove the first blank character of the specified condition
+condition=${condition:1}
+
+# If no condition was explicitly passed by the user then exit with code 3
+if [ -z "$condition" ]; then
+  echo "$cmdname: No condition/command detected." >&2
+  echo "Please pass a valid condition to be waited for." >&2
+  exit 5
+fi
+
+# Remove the first blank character of the specified states
+states=${states:1}
+
+# Remove all the blank spaces from the states variable
+states=`echo $states | tr -d " "`
+
+# If the user hasn't explicitly specified any state then set the default values
+if [ -z "$states" ]; then
+  states="|/-\\"
+fi
+
+# If the specified length is greater than the length of states, set the length to the length of states to length (to avoid abnormal behavior while animating)
+if [ $length -gt ${#states} ]
+then
+  length=${#states}
+fi
+
+# To ensure that the concept of state length is maintained, we'll add a space after every n characters so that the loop we'll be using later identifies each state uniquely (i.e. n characters at a time) [n=length]
+states=`echo "$states" | sed "s/.\{$length\}/& /g"`
+
+# Setting a handle to invalid commands (to validate the given condition)
+# This name is standard and the terminal is bound to recognize it.
+command_not_found_handle() {
+  # Display an error message
+  echo "$cmdname: The condition passed was invalid." >&2
+  echo "Please re-check the passed condition..." >&2
+
+  # Kill the current process
+  # `$$` is the PID of the current process
+  kill -PIPE $$
+ 
+  # Return the default return code of this handle
+  return 127
+}
+
+# Check if the passed condition is valid
+if $condition; then
+  # Since the passed condition is already true .. exit with code 0.
+  exit 0
+fi
+
+# Unsetting the user defined handle to avoid abnormal behavior in the future.
+unset command_not_found_handle
+
+# A function that evaluates a given mathematical expression and prints the output.
+calc(){ awk "BEGIN { print "$*" }"; }
+
+# Converting second(s) into millisecond(s)
+interval=$(calc $interval/1000)
+
+# Trap the SIGINT signal EXIT and run the function ctrl_c before exiting the process (both normally and abnormally)
+trap ctrl_c EXIT
+
+# Ensure that the keystrokes given by the user don't distort the animation
+# This command disables the echoing of keystroke inputs given by the user.
+stty -echo
+
+# A helper that would be use dalong with printf to print a string multiple times (length times)
+# We are just buffering the sequence here.
+lseq=`eval echo {1..$length}`
+
+# A format for printf that ensures that the length for each state remains fixed by indirectly adding spaces to it. (eg. %-4s "ab" -> "ab  ")
+# This is done to ensure that the backspacing can consistently remain of fixed length to avoid overheads while looping.
+format=`echo %-${length}s`
+
+# The exit function that resets the terminal setting to default and cleans the loader state that was last printed.
+function ctrl_c() {
+
+  # Set the background to black (0)
+  tput setaf 7
+
+  # Set the background to white (7)
+  tput setab 0
+
+  # Set the output style back to normal
+  if [ $bold ]
+  then
+    tput sgr0
+  fi
+
+  # Clean the last state that was printed by the loader
+  printf "\b %.0s\b" $lseq
+
+  # Make sure that the terminal is able to echo each keystroke, since the animation is done
+  stty echo
+
+  # Return the default return value that was expected
+  return 0
+}
+
+# Boilerplate state (Empty spaces)
+printf " %.0s" $lseq
+
+# Set the background and foreground color (it was previously set by the parameter parser)
+tput setaf $forecolor
+tput setab $backcolor
+
+# If the variable bold is set to true, set the terminal output style to bold
+if [ $bold ]
+then
+  tput bold
+fi
+
+# Infinite while loop
+while :; do
+
+ # Iterate through every state in states
+ for state in $states
+ do
+
+  # Wait for the given interval
+  sleep $interval
+
+  # If the the condition evaluates to true, the stop looping
+  if $condition; then break 2; fi
+
+  # Clean the previous state
+  printf "\b %.0s\b" $lseq
+
+  # Print the state in the given format (fixed-length)
+  printf ${format} "$state"
+ done
+done
+
+#Now the function ctrl_c will get called (EXIT)
